@@ -1,0 +1,11 @@
+# Node / tooling leftovers
+node_modules/
+
+# Python (if any local tooling is added)
+.venv/
+venv/
+__pycache__/
+
+# Editors
+.vscode/
+.idea/
