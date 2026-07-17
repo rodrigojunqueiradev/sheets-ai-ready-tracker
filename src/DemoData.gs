@@ -6,6 +6,11 @@
  * real log; the numbers are plausible by construction (weight with a mild
  * downward trend and noise, sleep between ~6 and 8 hours, realistic run
  * paces, 1-5 scales, most sessions executed with a couple of misses).
+ *
+ * Values are assembled in memory and written in batches (about 8 range
+ * writes per week) over sub-ranges that never touch the formula columns
+ * created by generateWeek_ (Runs Pace, Sleep Hours), so seeding takes
+ * seconds instead of issuing hundreds of single-cell writes.
  */
 
 // Monday of demo week 1. Weeks 2-5 follow consecutively.
@@ -44,77 +49,97 @@ function makeRng_(seed) {
   };
 }
 
-/** Fills one generated week block with plausible synthetic values. */
+/**
+ * Fills one generated week block with plausible synthetic values.
+ *
+ * All values are collected in memory and written through a handful of
+ * contiguous sub-ranges that skip the formula columns (Runs col 7 Pace,
+ * Sleep col 6 Hours). Rows that are intentionally skipped (weigh-in days
+ * off, the optional run, the missed session) are written as empty
+ * strings so the batch stays rectangular.
+ */
 function fillDemoWeek_(ss, block, w, rng) {
   const pick = function (min, max) { return min + rng() * (max - min); };
   const pickInt = function (min, max) { return Math.floor(pick(min, max + 1)); };
 
   // ---- Weight: mild downward trend + noise, 1-2 days skipped ----
-  const shWt = ss.getSheetByName(SHEET_NAMES.WEIGHT);
   const skipA = pickInt(0, 6), skipB = pickInt(0, 6);
+  const weightCol = [];
   for (let i = 0; i < 7; i++) {
-    if (i === skipA || i === skipB) continue;
-    const weight = 82.6 - 0.18 * w + pick(-0.35, 0.35);
-    shWt.getRange(block.rows.weight + i, 4).setValue(Math.round(weight * 10) / 10);
+    if (i === skipA || i === skipB) {
+      weightCol.push(['']);
+    } else {
+      const weight = 82.6 - 0.18 * w + pick(-0.35, 0.35);
+      weightCol.push([Math.round(weight * 10) / 10]);
+    }
   }
+  ss.getSheetByName(SHEET_NAMES.WEIGHT)
+    .getRange(block.rows.weight, 4, 7, 1).setValues(weightCol);
 
   // ---- Sleep: bedtime ~23:00-00:30 (midnight-safe), wake ~06:20-07:30 ----
-  const shS = ss.getSheetByName(SHEET_NAMES.SLEEP);
+  const sleepTimes = [];  // cols 4-5: Bedtime, Wake-up (time fractions)
+  const sleepRest = [];   // cols 7-10: Quality, Last coffee, Anxiety, Ritual
   for (let i = 0; i < 7; i++) {
     const bedMinutes = (23 * 60 + pickInt(0, 90)) % 1440; // may cross midnight
     const wakeMinutes = 6 * 60 + 20 + pickInt(0, 70);
     const coffeeMinutes = 15 * 60 + pickInt(0, 120);
-    const row = block.rows.sleep + i;
-    shS.getRange(row, 4).setValue(bedMinutes / 1440);   // Bedtime (time fraction)
-    shS.getRange(row, 5).setValue(wakeMinutes / 1440);  // Wake-up
-    shS.getRange(row, 7).setValue(pickInt(3, 5));       // Quality
-    shS.getRange(row, 8).setValue(coffeeMinutes / 1440);// Last coffee
-    shS.getRange(row, 9).setValue(pickInt(0, 3));       // Anxiety
-    shS.getRange(row, 10).setValue(rng() < 0.7 ? 'Y' : 'N');
+    sleepTimes.push([bedMinutes / 1440, wakeMinutes / 1440]);
+    sleepRest.push([pickInt(3, 5), coffeeMinutes / 1440, pickInt(0, 3), rng() < 0.7 ? 'Y' : 'N']);
   }
+  const shS = ss.getSheetByName(SHEET_NAMES.SLEEP);
+  shS.getRange(block.rows.sleep, 4, 7, 2).setValues(sleepTimes);
+  shS.getRange(block.rows.sleep, 7, 7, 4).setValues(sleepRest);
 
   // ---- Runs: 3 of 4 always executed; easy run only some weeks ----
-  const shR = ss.getSheetByName(SHEET_NAMES.RUNS);
   const runPlans = [
     { fill: rng() < 0.4, dist: pick(4.5, 5.5), pace: pick(6.2, 6.5) },              // easy (optional)
     { fill: true, dist: 6.0, pace: pick(5.4, 5.6) - 0.03 * w },                     // intervals
     { fill: true, dist: 6.5 + 0.3 * w, pace: pick(5.7, 5.9) - 0.03 * w },           // continuous
     { fill: true, dist: 7.0 + 0.5 * w, pace: pick(5.9, 6.2) - 0.03 * w },           // long
   ];
-  runPlans.forEach(function (plan, i) {
-    if (!plan.fill) return;
-    const row = block.rows.runs + i;
+  const runDistTime = [];  // cols 5-6: Distance, Time
+  const runFeel = [];      // col 8: Feel
+  runPlans.forEach(function (plan) {
+    if (!plan.fill) {
+      runDistTime.push(['', '']);
+      runFeel.push(['']);
+      return;
+    }
     const dist = Math.round(plan.dist * 10) / 10;
-    shR.getRange(row, 5).setValue(dist);
-    shR.getRange(row, 6).setValue(Math.round(dist * plan.pace * 10) / 10);
-    shR.getRange(row, 8).setValue(pickInt(3, 5));
+    runDistTime.push([dist, Math.round(dist * plan.pace * 10) / 10]);
+    runFeel.push([pickInt(3, 5)]);
   });
+  const shR = ss.getSheetByName(SHEET_NAMES.RUNS);
+  shR.getRange(block.rows.runs, 5, runPlans.length, 2).setValues(runDistTime);
+  shR.getRange(block.rows.runs, 8, runPlans.length, 1).setValues(runFeel);
 
   // ---- Workouts: loads with weekly progression; one session missed in week 2 ----
-  const shW = ss.getSheetByName(SHEET_NAMES.WORKOUTS);
-  let rowOffset = 0;
+  const workoutFill = [];  // cols 8-10: Load, Reps Done, RIR
   WEEKLY_WORKOUTS.forEach(function (wkBlock, b) {
     const missed = (w === 1 && wkBlock.workout.indexOf('D -') === 0); // week 2: D skipped
     wkBlock.items.forEach(function (item, i) {
-      const row = block.rows.workouts + rowOffset;
-      rowOffset++;
-      if (missed) return;
+      if (missed) {
+        workoutFill.push(['', '', '']);
+        return;
+      }
       const isCircuit = item[2] === '30 min';
-      shW.getRange(row, 8).setValue(isCircuit ? '' : 10 + ((b * 7 + i * 3) % 40) + w); // Load
-      shW.getRange(row, 9).setValue(isCircuit ? 30 : pickInt(8, 12));                  // Reps
-      shW.getRange(row, 10).setValue(isCircuit ? '' : pickInt(1, 2));                  // RIR
+      workoutFill.push([
+        isCircuit ? '' : 10 + ((b * 7 + i * 3) % 40) + w,
+        isCircuit ? 30 : pickInt(8, 12),
+        isCircuit ? '' : pickInt(1, 2),
+      ]);
     });
   });
+  ss.getSheetByName(SHEET_NAMES.WORKOUTS)
+    .getRange(block.rows.workouts, 8, workoutFill.length, 3).setValues(workoutFill);
 
   // ---- Nutrition ----
-  const shN = ss.getSheetByName(SHEET_NAMES.NUTRITION);
+  const nutritionFill = [];  // cols 4-7: Calories, Protein, Cravings, Snacking
   for (let i = 0; i < 7; i++) {
-    const row = block.rows.nutrition + i;
-    shN.getRange(row, 4).setValue(pickInt(1980, 2450));
-    shN.getRange(row, 5).setValue(pickInt(130, 175));
-    shN.getRange(row, 6).setValue(pickInt(0, 4));
-    shN.getRange(row, 7).setValue(rng() < 0.25 ? 'Y' : 'N');
+    nutritionFill.push([pickInt(1980, 2450), pickInt(130, 175), pickInt(0, 4), rng() < 0.25 ? 'Y' : 'N']);
   }
+  ss.getSheetByName(SHEET_NAMES.NUTRITION)
+    .getRange(block.rows.nutrition, 4, 7, 4).setValues(nutritionFill);
 
   // ---- Measurements: only weeks 1, 3, 5 (realistic cadence) ----
   if (w % 2 === 0) {
