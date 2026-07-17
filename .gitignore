@@ -9,3 +9,9 @@ __pycache__/
 # Editors
 .vscode/
 .idea/
+
+# Local working files (never published)
+_local/
+
+# clasp project binding (account/script specific)
+.clasp.json
