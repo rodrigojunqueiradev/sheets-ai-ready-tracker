@@ -45,7 +45,7 @@ const SHEET_NAMES = {
 };
 
 const HEADERS = {
-  [SHEET_NAMES.SUMMARY]: ['Week', 'Start', 'End', 'Avg Weight (kg)', 'Weight Change (kg)', 'Avg Sleep (h)', 'Sleep Quality (1-5)', 'Anxiety (0-5)', 'Gym Sessions', 'Runs', 'Km Run', 'Sweet Cravings (avg)', 'Week Notes'],
+  [SHEET_NAMES.SUMMARY]: ['Week', 'Start', 'End', 'Avg Weight (kg)', 'Weight Change (kg)', 'Avg Sleep (h)', 'Sleep Quality (1-5)', 'Anxiety (0-5)', 'Training Days', 'Runs', 'Km Run', 'Sweet Cravings (avg)', 'Week Notes'],
   [SHEET_NAMES.WORKOUTS]: ['Week', 'Date', 'Day', 'Workout', 'Order', 'Exercise', 'Target', 'Load (kg)', 'Reps Done', 'RIR', 'Notes'],
   [SHEET_NAMES.RUNS]: ['Week', 'Date', 'Day', 'Type', 'Distance (km)', 'Time (min)', 'Pace (min/km)', 'Feel (1-5)', 'Notes'],
   [SHEET_NAMES.WEIGHT]: ['Week', 'Date', 'Day', 'Weight (kg)', 'Notes'],

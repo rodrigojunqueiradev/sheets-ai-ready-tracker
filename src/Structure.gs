@@ -28,10 +28,14 @@ function createStructure() {
     ss.moveActiveSheet(i + 1);
   });
 
-  // Remove the default empty tab, if still present
-  ['Sheet1', 'Página1'].forEach(function (n) {
-    const sh = ss.getSheetByName(n);
-    if (sh && sh.getLastRow() === 0 && ss.getSheets().length > 1) ss.deleteSheet(sh);
+  // Remove leftover default tabs, locale-agnostically: any sheet outside
+  // SHEET_NAMES that is completely empty (new spreadsheets name the
+  // initial tab differently per locale). Never delete the last sheet.
+  const known = Object.keys(SHEET_NAMES).map(function (k) { return SHEET_NAMES[k]; });
+  ss.getSheets().forEach(function (sh) {
+    if (known.indexOf(sh.getName()) === -1 && sh.getLastRow() === 0 && ss.getSheets().length > 1) {
+      ss.deleteSheet(sh);
+    }
   });
 
   // Useful column widths
@@ -57,12 +61,23 @@ function applyValidations_(ss) {
   };
   const yn = SpreadsheetApp.newDataValidation().requireValueInList(['Y', 'N'], true).setAllowInvalid(true).build();
 
-  ss.getSheetByName(SHEET_NAMES.SLEEP).getRange(2, 7, nRows).setDataValidation(num(1, 5));      // Quality
-  ss.getSheetByName(SHEET_NAMES.SLEEP).getRange(2, 9, nRows).setDataValidation(num(0, 5));      // Anxiety
-  ss.getSheetByName(SHEET_NAMES.SLEEP).getRange(2, 10, nRows).setDataValidation(yn);            // Ritual
-  ss.getSheetByName(SHEET_NAMES.NUTRITION).getRange(2, 6, nRows).setDataValidation(num(0, 5));  // Cravings
-  ss.getSheetByName(SHEET_NAMES.NUTRITION).getRange(2, 7, nRows).setDataValidation(yn);         // Snacking
-  ss.getSheetByName(SHEET_NAMES.RUNS).getRange(2, 8, nRows).setDataValidation(num(1, 5));       // Feel
+  const SL = SHEET_NAMES.SLEEP, NU = SHEET_NAMES.NUTRITION, RN = SHEET_NAMES.RUNS;
+  ss.getSheetByName(SL).getRange(2, col_(SL, 'Quality (1-5)'), nRows).setDataValidation(num(1, 5));
+  ss.getSheetByName(SL).getRange(2, col_(SL, 'Anxiety (0-5)'), nRows).setDataValidation(num(0, 5));
+  ss.getSheetByName(SL).getRange(2, col_(SL, 'Wind-down Ritual (Y/N)'), nRows).setDataValidation(yn);
+  ss.getSheetByName(NU).getRange(2, col_(NU, 'Sweet Cravings (0-5)'), nRows).setDataValidation(num(0, 5));
+  ss.getSheetByName(NU).getRange(2, col_(NU, 'Off-plan Snacking (Y/N)'), nRows).setDataValidation(yn);
+  ss.getSheetByName(RN).getRange(2, col_(RN, 'Feel (1-5)'), nRows).setDataValidation(num(1, 5));
+}
+
+/**
+ * Resolves the 1-based column index of a header label in a tab, straight
+ * from the HEADERS catalog, so no validation carries a magic index.
+ */
+function col_(sheetName, headerLabel) {
+  const idx = HEADERS[sheetName].indexOf(headerLabel);
+  if (idx === -1) throw new Error('Unknown header "' + headerLabel + '" in ' + sheetName);
+  return idx + 1;
 }
 
 function writeInstructions_(ss) {
@@ -71,7 +86,7 @@ function writeInstructions_(ss) {
   const lines = [
     ['HOW TO USE THIS SPREADSHEET'],
     [''],
-    ['1) Every Monday: menu "Tracker" > "New week". This generates every row for the week (workouts, runs, weight, sleep, nutrition, measurements, and the summary line).'],
+    ['1) Every Monday: menu "Tracker" > "New week". This generates every row for the week (workouts, runs, weight, sleep, nutrition, measurements, and the summary line). Type the start date in the ' + CONFIG.DATE_FORMAT + ' format, or leave it empty for the current week; a date that is not a Monday is adjusted to the Monday of that week automatically.'],
     ['2) Fill in as the week goes. Workouts: load, reps, and RIR (reps in reserve, target 1-2). Runs: distance and time (pace computes itself). Sleep: bedtime/wake-up (hours compute themselves, midnight-safe), quality, last coffee, anxiety, wind-down ritual.'],
     ['3) Weight: log on the days you weigh in (fasted, same scale). The Summary uses the weekly AVERAGE.'],
     ['4) Measurements: one row per week is pre-created; fill it when you measure (same conditions, tape at the same spot). Leave empty on weeks you skip.'],
