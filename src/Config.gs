@@ -71,7 +71,7 @@ const WEEKLY_WORKOUTS = [
     ['6b', 'Superset: Barbell curl', '3x10-12'],
   ]},
   { offset: 1, workout: 'Functional', items: [
-    ['-', 'Functional circuit (30 min)', '30 min'],
+    ['', 'Functional circuit (30 min)', '30 min'],
   ]},
   { offset: 2, workout: 'C - Lower Body (light)', items: [
     ['1',  'Leg press 45', '3x12-15'],
@@ -91,7 +91,7 @@ const WEEKLY_WORKOUTS = [
     ['6b', 'Superset: Hammer curl', '3x10-12'],
   ]},
   { offset: 3, workout: 'Functional', items: [
-    ['-', 'Functional circuit (30 min)', '30 min'],
+    ['', 'Functional circuit (30 min)', '30 min'],
   ]},
   { offset: 4, workout: 'D - Back/Posterior Chain', items: [
     ['1',  'Barbell stiff-leg deadlift', '3x10-12'],
