@@ -11,7 +11,11 @@ function addDays_(d, n) {
 
 /** CSV-escapes one cell value. */
 function csv_(v) {
-  const s = String(v == null ? '' : v);
+  let s = String(v == null ? '' : v);
+  // Mitigate CSV formula injection: neutralize non-numeric values that a
+  // spreadsheet would evaluate. Negative numbers such as -0.14 are
+  // numeric, so they pass through untouched.
+  if (!isFinite(Number(s)) && /^[=+@-]/.test(s)) s = "'" + s;
   return /[",\n]/.test(s) ? '"' + s.replace(/"/g, '""') + '"' : s;
 }
 

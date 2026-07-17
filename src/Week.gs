@@ -8,7 +8,9 @@
 
 /**
  * Menu action: prompts for the week's start date (Monday) and generates
- * the block. Defaults to the Monday of the current week.
+ * the block. Defaults to the Monday of the current week, computed in the
+ * spreadsheet's timezone. A typed date that is not a Monday is adjusted
+ * to the Monday of that week.
  */
 function newWeek() {
   const ss = SpreadsheetApp.getActiveSpreadsheet();
@@ -16,15 +18,17 @@ function newWeek() {
   if (!ss.getSheetByName(SHEET_NAMES.SUMMARY)) createStructure();
 
   const tz = ss.getSpreadsheetTimeZone();
-  const today = new Date();
-  const monday = new Date(today);
-  monday.setDate(today.getDate() - ((today.getDay() + 6) % 7));
+  // "Today" as a calendar date in the spreadsheet's timezone, not the
+  // script runtime's (the two can disagree around midnight).
+  const t = Utilities.formatDate(new Date(), tz, 'yyyy-MM-dd').split('-').map(Number);
+  const today = new Date(t[0], t[1] - 1, t[2], 12, 0, 0);
+  const monday = addDays_(today, -((today.getDay() + 6) % 7));
   const suggestion = Utilities.formatDate(monday, tz, CONFIG.DATE_FORMAT);
 
   const nextWeek = nextWeekNumber_(ss);
   const resp = ui.prompt(
     'New week - #' + nextWeek,
-    'Start date (Monday), format dd/mm/yyyy.\nLeave empty to use ' + suggestion + '.',
+    'Start date (Monday), format ' + CONFIG.DATE_FORMAT + '.\nLeave empty to use ' + suggestion + '.',
     ui.ButtonSet.OK_CANCEL
   );
   if (resp.getSelectedButton() !== ui.Button.OK) return;
@@ -34,12 +38,17 @@ function newWeek() {
   if (!txt) {
     start = monday;
   } else {
-    const p = txt.split('/');
-    start = new Date(Number(p[2]), Number(p[1]) - 1, Number(p[0]));
-    if (p.length !== 3 || isNaN(start.getTime())) {
-      ui.alert('Invalid date. Use the dd/mm/yyyy format.');
+    start = parseDateInput_(txt);
+    if (!start) {
+      ui.alert('Invalid date. Use the ' + CONFIG.DATE_FORMAT + ' format with a day that exists in that month.');
       return;
     }
+  }
+
+  let adjusted = false;
+  if (start.getDay() !== 1) {
+    start = addDays_(start, -((start.getDay() + 6) % 7));
+    adjusted = true;
   }
 
   const block = generateWeek_(ss, start);
@@ -47,22 +56,64 @@ function newWeek() {
   ss.toast(
     'Week ' + block.week + ' created: ' +
     Utilities.formatDate(block.start, tz, 'dd/MM') + ' to ' +
-    Utilities.formatDate(block.end, tz, 'dd/MM'),
+    Utilities.formatDate(block.end, tz, 'dd/MM') +
+    (adjusted
+      ? '. Start adjusted to Monday ' + Utilities.formatDate(block.start, tz, CONFIG.DATE_FORMAT) + '.'
+      : ''),
     'Tracker', 8
   );
 }
 
 /**
- * Reads the Summary tab and returns the next auto-incremental week number
- * (derived from content, so deleting or importing weeks stays consistent).
+ * Parses a date typed in CONFIG.DATE_FORMAT. The day/month/year order and
+ * the separator are derived from the format constant itself, so changing
+ * CONFIG.DATE_FORMAT changes the accepted input too.
+ *
+ * Returns a Date anchored at noon, or null when the text does not match
+ * the format or names a day that does not exist in that month (a rollover
+ * like 31/02 would otherwise silently become March 3).
+ *
+ * @param {string} txt
+ * @return {Date|null}
+ */
+function parseDateInput_(txt) {
+  const format = CONFIG.DATE_FORMAT;
+  const sepMatch = format.match(/[^dMy]/);
+  if (!sepMatch) return null;
+  const sep = sepMatch[0];
+  const order = ['dd', 'MM', 'yyyy']
+    .map(function (token) { return { token: token, pos: format.indexOf(token) }; })
+    .sort(function (a, b) { return a.pos - b.pos; });
+
+  const parts = txt.split(sep);
+  if (parts.length !== 3) return null;
+
+  const c = {};
+  order.forEach(function (o, i) { c[o.token] = Number(parts[i]); });
+  if (!c.dd || !c.MM || !c.yyyy) return null;
+
+  const d = new Date(c.yyyy, c.MM - 1, c.dd, 12, 0, 0);
+  if (d.getFullYear() !== c.yyyy || d.getMonth() !== c.MM - 1 || d.getDate() !== c.dd) {
+    return null; // rollover: the typed day does not exist in that month
+  }
+  return d;
+}
+
+/**
+ * Returns the next auto-incremental week number by scanning the Week
+ * column of every data tab (all of SHEET_NAMES except Instructions), so
+ * the number is derived from the data itself and stays consistent after
+ * deletions or partial imports in any tab.
  */
 function nextWeekNumber_(ss) {
-  const summary = ss.getSheetByName(SHEET_NAMES.SUMMARY);
   let last = 0;
-  if (summary && summary.getLastRow() > 1) {
-    summary.getRange(2, 1, summary.getLastRow() - 1, 1).getValues()
+  Object.keys(SHEET_NAMES).forEach(function (key) {
+    if (key === 'INSTRUCTIONS') return;
+    const sh = ss.getSheetByName(SHEET_NAMES[key]);
+    if (!sh || sh.getLastRow() < 2) return;
+    sh.getRange(2, 1, sh.getLastRow() - 1, 1).getValues()
       .forEach(function (r) { const v = Number(r[0]); if (v > last) last = v; });
-  }
+  });
   return last + 1;
 }
 
@@ -78,7 +129,9 @@ function nextWeekNumber_(ss) {
 function generateWeek_(ss, start) {
   const week = nextWeekNumber_(ss);
   start = new Date(start);
-  start.setHours(0, 0, 0, 0);
+  // Anchor at noon: a noon instant renders as the same calendar date in
+  // any spreadsheet timezone offset, regardless of the script timezone.
+  start.setHours(12, 0, 0, 0);
   const end = addDays_(start, 6);
 
   // ---- Workouts ----
@@ -104,7 +157,7 @@ function generateWeek_(ss, start) {
   shR.getRange(r0R, 1, runRows.length, 9).setValues(runRows);
   shR.getRange(r0R, 2, runRows.length, 1).setNumberFormat(CONFIG.DATE_FORMAT);
   shR.getRange(r0R, 7, runRows.length, 1)
-    .setFormulaR1C1('=IF(OR(RC[-2]="",RC[-1]=""),"",ROUND(RC[-1]/RC[-2],2))'); // Pace = time / distance
+    .setFormulaR1C1('=IF(OR(RC[-2]="",RC[-2]=0,RC[-1]=""),"",ROUND(RC[-1]/RC[-2],2))'); // Pace = time / distance
 
   // ---- Weight, Sleep, Nutrition (7 days each) ----
   const weightRows = [], sleepRows = [], nutritionRows = [];

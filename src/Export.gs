@@ -29,8 +29,20 @@ function exportReport() {
     ui.ButtonSet.OK_CANCEL
   );
   if (resp.getSelectedButton() !== ui.Button.OK) return;
-  const n = Number(resp.getResponseText().trim());
-  const minWeek = (n && n > 0) ? Math.max(1, maxWeek - n + 1) : 1;
+  const txt = resp.getResponseText().trim();
+  let minWeek = 1;
+  if (txt) {
+    const n = Number(txt);
+    if (!Number.isInteger(n) || n <= 0) {
+      ui.alert(
+        'Invalid input',
+        '"' + txt + '" is not a positive whole number. Enter how many recent weeks to include, or leave empty to export all.',
+        ui.ButtonSet.OK
+      );
+      return;
+    }
+    minWeek = Math.max(1, maxWeek - n + 1);
+  }
 
   const order = [
     SHEET_NAMES.SUMMARY, SHEET_NAMES.WEIGHT, SHEET_NAMES.MEASUREMENTS,
